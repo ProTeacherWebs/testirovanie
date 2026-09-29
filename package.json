@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "api": "node --env-file=.env server.mjs",
+    "api": "node --env-file=.env local-server.mjs",
     "build": "vite build",
-    "start": "npm run build && node --env-file=.env server.mjs"
+    "start": "npm run build && node --env-file=.env local-server.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.15.15",

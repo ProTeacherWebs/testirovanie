@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createClient } from '@libsql/client';
 import { answerKey } from './answer-key.mjs';
 import { questions } from './src/questions.js';
@@ -14,7 +14,6 @@ const databaseUrl = process.env.TURSO_DATABASE_URL;
 const authToken = process.env.TURSO_AUTH_TOKEN;
 const adminPassword = process.env.ADMIN_PASSWORD || '';
 const db = databaseUrl && authToken ? createClient({ url: databaseUrl, authToken }) : null;
-const adminSessions = new Map();
 const openQuestions = questions.filter((question) => question.type === 'text' || question.type === 'fields');
 let schemaReady;
 
@@ -59,6 +58,11 @@ function json(response, status, data) {
 }
 
 async function readBody(request) {
+  if (request.body !== undefined) {
+    if (typeof request.body === 'string') return request.body ? JSON.parse(request.body) : {};
+    if (Buffer.isBuffer(request.body)) return request.body.length ? JSON.parse(request.body.toString('utf8')) : {};
+    if (request.body && typeof request.body === 'object') return request.body;
+  }
   let raw = '';
   for await (const chunk of request) {
     raw += chunk;
@@ -78,14 +82,20 @@ function countTabSwitches(events) {
 function getAdminSession(request) {
   const cookies = String(request.headers.cookie || '').split(';');
   const sessionCookie = cookies.find((part) => part.trim().startsWith('admin_session='));
-  const sessionId = sessionCookie?.split('=').slice(1).join('=').trim();
-  if (!sessionId) return null;
-  const expiresAt = adminSessions.get(sessionId);
-  if (!expiresAt || expiresAt <= Date.now()) {
-    adminSessions.delete(sessionId);
-    return null;
-  }
-  return sessionId;
+  const token = sessionCookie?.split('=').slice(1).join('=').trim();
+  if (!token || !adminPassword) return null;
+  const [expiresAt, signature] = token.split('.', 2);
+  if (!expiresAt || !signature || !Number.isFinite(Number(expiresAt)) || Number(expiresAt) <= Date.now()) return null;
+  const expected = createHmac('sha256', adminPassword).update(expiresAt).digest('base64url');
+  const actualBytes = Buffer.from(signature);
+  const expectedBytes = Buffer.from(expected);
+  return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes) ? token : null;
+}
+
+function createAdminSession() {
+  const expiresAt = String(Date.now() + 8 * 60 * 60 * 1000);
+  const signature = createHmac('sha256', adminPassword).update(expiresAt).digest('base64url');
+  return `${expiresAt}.${signature}`;
 }
 
 function secureCookie(request) {
@@ -112,7 +122,7 @@ function grade(answers) {
   return { score, total: questions.length, questions };
 }
 
-async function apiRoute(request, response, url) {
+export async function apiRoute(request, response, url) {
   try {
     await ensureSchema();
     if (request.method === 'GET' && url.pathname === '/api/status') return json(response, 200, { ready: true });
@@ -121,9 +131,8 @@ async function apiRoute(request, response, url) {
       if (!adminPassword) return json(response, 503, { error: 'В .env не задан пароль админки (ADMIN_PASSWORD).' });
       const body = await readBody(request);
       if (!passwordMatches(body.password)) return json(response, 401, { error: 'Неверный пароль.' });
-      const sessionId = randomUUID();
-      adminSessions.set(sessionId, Date.now() + 8 * 60 * 60 * 1000);
-      response.setHeader('Set-Cookie', `admin_session=${sessionId}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secureCookie(request)}`);
+      const session = createAdminSession();
+      response.setHeader('Set-Cookie', `admin_session=${session}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secureCookie(request)}`);
       return json(response, 200, { authenticated: true });
     }
 
@@ -132,8 +141,6 @@ async function apiRoute(request, response, url) {
     }
 
     if (url.pathname === '/api/admin/logout' && request.method === 'POST') {
-      const sessionId = getAdminSession(request);
-      if (sessionId) adminSessions.delete(sessionId);
       response.setHeader('Set-Cookie', `admin_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie(request)}`);
       return json(response, 200, { authenticated: false });
     }
@@ -301,4 +308,7 @@ const server = createServer(async (request, response) => {
   }
 });
 
-server.listen(port, () => console.log(`Frontend exam ready at http://localhost:${port}`));
+const invokedFile = process.argv[1] ? resolve(process.argv[1]) : '';
+if (invokedFile === fileURLToPath(import.meta.url)) {
+  server.listen(port, () => console.log(`Frontend exam ready at http://localhost:${port}`));
+}
