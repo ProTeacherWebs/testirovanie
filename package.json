@@ -1,0 +1,19 @@
+{
+  "name": "frontend-final-exam",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "api": "node --env-file=.env server.mjs",
+    "build": "vite build",
+    "start": "npm run build && node --env-file=.env server.mjs"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.15.15",
+    "@vitejs/plugin-react": "^6.1.1",
+    "vite": "^8.0.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  }
+}
