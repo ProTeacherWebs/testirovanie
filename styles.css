@@ -10,6 +10,7 @@
   --paper: #fffefa;
   --acid: #d6f25a;
   --olive: #4d5b31;
+  --logo-ink: #827443;
   --soft: #ecece3;
   --danger: #aa4439;
 }
@@ -22,12 +23,10 @@ button { cursor: pointer; }
 
 .page-shell { min-height: 100vh; max-width: 1440px; margin: 0 auto; padding: 0 6.1vw; display: flex; flex-direction: column; }
 .topbar { height: 84px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
-.brand { display: inline-flex; align-items: center; gap: 11px; color: var(--ink); text-decoration: none; font-weight: 700; font-size: 19px; letter-spacing: -.02em; }
+.brand { display: inline-flex; align-items: center; gap: 11px; color: var(--logo-ink); text-decoration: none; font-weight: 700; font-size: 19px; letter-spacing: -.02em; }
 .brand-mark { width: 29px; height: 29px; display: grid; place-items: center; border-radius: 50%; background: var(--ink); color: var(--acid); font: 800 19px 'Aptos Display', 'Segoe UI', sans-serif; }
-.topbar-note { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 17px; }
+.topbar-note { display: flex; align-items: center; gap: 9px; color: var(--logo-ink); font-size: 17px; }
 .topbar-actions { display: flex; align-items: center; gap: 22px; }
-.admin-link { color: #62694c; font-size: 17px; font-weight: 700; text-decoration: none; }
-.admin-link:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 4px; }
 .status-dot { width: 7px; height: 7px; display: inline-block; border-radius: 50%; background: #859946; }
 .main-content { flex: 1; }
 .intro-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 40px; padding: 64px 0 49px; border-bottom: 1px solid var(--line); }
@@ -196,6 +195,10 @@ input:focus, select:focus, textarea:focus { border-color: #89975a; box-shadow: 0
 .admin-error { color: #98433a; background: #f8e9e4; }
 .admin-success { color: #4d642f; background: #edf2df; }
 .admin-callout { margin: 20px 0; color: #705d34; background: #f3efdd; }
+.admin-focus-activity { margin: 17px 0 23px; padding: 13px 15px; border: 1px solid #dedfd5; border-radius: 9px; background: #fbfaf5; color: #65675b; font-size: 16px; }
+.admin-focus-activity summary { width: fit-content; cursor: pointer; color: #62694c; font-weight: 700; }
+.admin-focus-activity ul { display: grid; gap: 6px; margin: 12px 0 0; padding-left: 20px; }
+.admin-focus-activity p { margin: 10px 0 0; }
 .admin-breadcrumb { display: flex; align-items: center; gap: 10px; margin-bottom: 28px; color: #9a9b90; font-size: 16px; }
 .admin-breadcrumb button { padding: 0; border: 0; color: #656a4e; background: transparent; font: inherit; font-weight: 700; }
 .admin-breadcrumb button:hover { text-decoration: underline; text-underline-offset: 3px; }

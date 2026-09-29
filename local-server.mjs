@@ -150,7 +150,7 @@ export async function apiRoute(request, response, url) {
 
       if (request.method === 'GET' && url.pathname === '/api/admin/students') {
         const result = await db.execute(`SELECT r.id AS registration_id, r.first_name, r.last_name, r.study_time, r.created_at,
-          a.id AS attempt_id, a.started_at, a.submitted_at, a.auto_score, a.auto_total, a.manual_grades, a.reviewed_at
+          a.id AS attempt_id, a.started_at, a.submitted_at, a.auto_score, a.auto_total, a.tab_switches, a.manual_grades, a.reviewed_at
           FROM registrations r JOIN attempts a ON a.registration_id = r.id`);
         const students = result.rows.map((row) => {
           const manualGrades = JSON.parse(row.manual_grades || '{}');
@@ -165,6 +165,7 @@ export async function apiRoute(request, response, url) {
             createdAt: row.created_at,
             startedAt: row.started_at,
             submittedAt: row.submitted_at,
+            tabSwitches: Number(row.tab_switches) || 0,
             autoScore: row.auto_score,
             autoTotal: row.auto_total,
             manualScore,
@@ -198,7 +199,7 @@ export async function apiRoute(request, response, url) {
       const attemptMatch = url.pathname.match(/^\/api\/admin\/attempts\/([\w-]+)$/);
       if (attemptMatch && request.method === 'GET') {
         const result = await db.execute({
-          sql: `SELECT r.first_name, r.last_name, r.study_time, a.id AS attempt_id, a.answers, a.submitted_at,
+          sql: `SELECT r.first_name, r.last_name, r.study_time, a.id AS attempt_id, a.answers, a.events, a.submitted_at,
             a.auto_score, a.auto_total, a.tab_switches, a.manual_grades, a.reviewed_at
             FROM attempts a JOIN registrations r ON r.id = a.registration_id WHERE a.id = ?`,
           args: [attemptMatch[1]]
@@ -213,6 +214,7 @@ export async function apiRoute(request, response, url) {
           lastName: row.last_name,
           studyTime: row.study_time,
           answers,
+          events: JSON.parse(row.events || '[]'),
           submittedAt: row.submitted_at,
           autoScore: Number(row.auto_score) || 0,
           autoTotal: Number(row.auto_total) || automatic.total,

@@ -38,6 +38,16 @@ function automaticAnswer(question, answer) {
   return selected.map((id) => question.options?.find(([optionId]) => optionId === id)?.[1] || id).join(', ');
 }
 
+function FocusActivity({ events = [] }) {
+  const switches = events.filter((event) => event?.type === 'page_hidden');
+  return <details className="admin-focus-activity">
+    <summary>Переключения вкладки: {switches.length}</summary>
+    {switches.length
+      ? <ul>{switches.map((event, index) => <li key={`${event.at}-${index}`}>{new Date(event.at).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })}</li>)}</ul>
+      : <p>Переключений не зафиксировано.</p>}
+  </details>;
+}
+
 function AdminFrame({ children, onLogout, authed = true }) {
   return <div className="admin-shell">
     <header className="admin-topbar">
@@ -120,7 +130,7 @@ function Roster({ students, onRefresh, onSelect, error, refreshing }) {
           ? <p className="admin-empty">Пока нет учеников в этой группе.</p>
           : <div className="admin-student-list">{members.map((student) => <button type="button" className="admin-student-row" key={student.attemptId} onClick={() => onSelect(student)}>
             <span className="admin-student-avatar" aria-hidden="true">{student.firstName.slice(0, 1)}{student.lastName.slice(0, 1)}</span>
-            <span className="admin-student-info"><strong>{student.firstName} {student.lastName}</strong><small>{student.submittedAt ? `Отправлен ${new Date(student.submittedAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })}` : 'Попытка ещё не отправлена'}</small></span>
+            <span className="admin-student-info"><strong>{student.firstName} {student.lastName}</strong><small>{student.submittedAt ? `Отправлен ${new Date(student.submittedAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })}` : 'Попытка ещё не отправлена'} · Переходов: {student.tabSwitches || 0}</small></span>
             <span className={`admin-status admin-status-${student.status}`}>{statusLabel(student)}</span>
             {student.status === 'reviewed' && <span className="admin-student-score">{student.overallScore}/35</span>}
             <span className="admin-row-arrow" aria-hidden="true">↗</span>
@@ -141,6 +151,7 @@ function Review({ detail, marks, setMarks, onSave, onBack, saving, message, erro
       <div className="admin-review-progress"><strong>{markedCount}<span> / {openQuestions.length}</span></strong><small>ответов оценено</small></div>
     </div>
     {!detail.submittedAt && <div className="admin-callout">Ученик ещё проходит тест. Оценить ответы можно после отправки попытки.</div>}
+    <FocusActivity events={detail.events} />
     {error && <p className="admin-error" role="alert">{error}</p>}
     {message && <p className="admin-success" role="status">{message}</p>}
     <div className="admin-review-list">
@@ -166,7 +177,7 @@ function Review({ detail, marks, setMarks, onSave, onBack, saving, message, erro
   </>;
 }
 
-function Results({ detail, onBack, onEdit }) {
+function Results({ detail, onBack, onEdit, onNext, nextStudent }) {
   const manualCount = openQuestions.filter((question) => detail.manualGrades?.[question.id] === true).length;
   const total = detail.autoTotal + openQuestions.length;
   const correct = detail.autoScore + manualCount;
@@ -180,8 +191,9 @@ function Results({ detail, onBack, onEdit }) {
       <div><p className="eyebrow">{detail.studyTime} · {detail.firstName} {detail.lastName}</p><h1>Результат тестирования</h1><p>Автоматическая проверка и оценка открытых ответов.</p></div>
       <div className="admin-result-percent"><strong>{percent}%</strong><span>правильных ответов</span></div>
       <div className="admin-result-counts"><div><strong>{correct}</strong><span>верных</span></div><div><strong>{incorrect}</strong><span>неверных</span></div><div><strong>{total}</strong><span>вопросов</span></div></div>
-      <div className="admin-result-actions"><button type="button" className="button button-secondary" onClick={onEdit}>Изменить оценку открытых ответов</button><button type="button" className="button button-primary" onClick={onBack}>К списку учеников</button></div>
+      <div className="admin-result-actions"><button type="button" className="button button-secondary" onClick={onEdit}>Изменить оценку открытых ответов</button>{nextStudent && <button type="button" className="button button-secondary" onClick={onNext}>Следующая работа: {nextStudent.firstName} {nextStudent.lastName}</button>}<button type="button" className="button button-primary" onClick={onBack}>К списку учеников</button></div>
     </section>
+    <FocusActivity events={detail.events} />
     <div className="admin-result-list-heading"><h2>Ответы по всем вопросам</h2><span>Открытых: {openQuestions.length} · Автоматически проверено: {detail.autoTotal}</span></div>
     <div className="admin-result-list">
       {questions.map((question, index) => {
@@ -277,6 +289,11 @@ export default function AdminApp() {
     }
   }
 
+  function openNextWork() {
+    const nextStudent = students.find((student) => student.attemptId !== selectedAttempt && student.status === 'review');
+    if (nextStudent) openAttempt(nextStudent);
+  }
+
   async function logout() {
     await adminApi('/api/admin/logout', { method: 'POST' }).catch(() => {});
     setAuth('login');
@@ -290,6 +307,6 @@ export default function AdminApp() {
   return <AdminFrame onLogout={logout}>
     {route === 'roster' && <Roster students={students} onRefresh={loadStudents} onSelect={openAttempt} error={error} refreshing={refreshing} />}
     {route === 'review' && detail && <Review detail={detail} marks={marks} setMarks={setMarks} onSave={saveReview} onBack={() => { setRoute('roster'); setMessage(''); setError(''); loadStudents(); }} saving={saving} message={message} error={error} />}
-    {route === 'results' && detail && <Results detail={detail} onBack={() => { setRoute('roster'); setError(''); loadStudents(); }} onEdit={() => { setMarks(detail.manualGrades || {}); setRoute('review'); }} />}
+    {route === 'results' && detail && <Results detail={detail} onBack={() => { setRoute('roster'); setError(''); loadStudents(); }} onEdit={() => { setMarks(detail.manualGrades || {}); setRoute('review'); }} onNext={openNextWork} nextStudent={students.find((student) => student.attemptId !== selectedAttempt && student.status === 'review')} />}
   </AdminFrame>;
 }

@@ -3,7 +3,21 @@ import { questions, shuffle } from './questions.js';
 import AdminApp from './AdminApp.jsx';
 
 const SESSION_KEY = 'frontendExamSession';
-const TIME_LIMIT = 60 * 60 * 1000;
+const TIME_LIMIT = 40 * 60 * 1000;
+const draftKey = (attemptId) => `frontendExamDraft:${attemptId}`;
+
+function readDraft(attemptId) {
+  try {
+    const draft = JSON.parse(localStorage.getItem(draftKey(attemptId)) || 'null');
+    return draft && typeof draft.answers === 'object' && Array.isArray(draft.events) ? draft : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeDraft(attemptId, answers, events) {
+  localStorage.setItem(draftKey(attemptId), JSON.stringify({ answers, events, savedAt: Date.now() }));
+}
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -31,7 +45,7 @@ function Header() {
     <a className="brand" href="/" aria-label="Финальная проверка, на главную">
       <span className="brand-mark" aria-hidden="true">F</span><span>Курс frontend</span>
     </a>
-    <div className="topbar-actions"><div className="topbar-note"><span className="status-dot" />Итоговое тестирование</div><a className="admin-link" href="/admin">Админка</a></div>
+    <div className="topbar-actions"><div className="topbar-note"><span className="status-dot" />Итоговое тестирование</div></div>
   </header>;
 }
 
@@ -45,7 +59,7 @@ function Intro() {
     <div className="exam-summary" aria-label="Сведения о тесте">
       <div className="summary-item"><strong>{questions.length}</strong><span>вопросов</span></div>
       <div className="summary-rule" />
-      <div className="summary-item"><strong>60</strong><span>минут</span></div>
+      <div className="summary-item"><strong>40</strong><span>минут</span></div>
       <div className="summary-rule" />
       <div className="summary-item"><strong>↻</strong><span>автосохранение</span></div>
     </div>
@@ -217,6 +231,8 @@ function ExamApp() {
   const submitRef = useRef(null);
   const autosaveReady = useRef(false);
   const answerScrollPosition = useRef(null);
+  const saveQueue = useRef(Promise.resolve());
+  const draftPending = useRef(false);
 
   const question = order.length ? questions[order[index]] : null;
   const answeredCount = useMemo(() => order.filter((qIndex) => isAnswered(questions[qIndex], answers[questions[qIndex].id])).length, [order, answers]);
@@ -245,18 +261,31 @@ function ExamApp() {
       try {
         const savedSession = JSON.parse(raw);
         if (!savedSession.attemptId || savedSession.order?.length !== questions.length) return;
-        const saved = await api(`/api/attempts/${encodeURIComponent(savedSession.attemptId)}`);
-        if (!active || saved.submittedAt) {
-          if (saved.submittedAt) sessionStorage.removeItem(SESSION_KEY);
+        const draft = readDraft(savedSession.attemptId);
+        let saved = null;
+        try {
+          saved = await api(`/api/attempts/${encodeURIComponent(savedSession.attemptId)}`);
+        } catch {
+          setSaveStatus('Нет связи — ответы останутся на этом устройстве');
+        }
+        if (!active || saved?.submittedAt) {
+          if (saved?.submittedAt) {
+            sessionStorage.removeItem(SESSION_KEY);
+            localStorage.removeItem(draftKey(savedSession.attemptId));
+          }
           return;
         }
+        const endsAt = savedSession.startedAt
+          ? Math.min(savedSession.endsAt, savedSession.startedAt + TIME_LIMIT)
+          : savedSession.endsAt;
         setStudent(savedSession.student);
         setAttemptId(savedSession.attemptId);
         setOrder(savedSession.order);
-        setDeadline(savedSession.endsAt);
-        setRemaining(Math.max(0, savedSession.endsAt - Date.now()));
-        setAnswers(saved.answers || {});
-        setEvents(saved.events || []);
+        setDeadline(endsAt);
+        setRemaining(Math.max(0, endsAt - Date.now()));
+        setAnswers(draft?.answers || saved?.answers || {});
+        setEvents(draft?.events || saved?.events || []);
+        if (draft && !saved) draftPending.current = true;
         autosaveReady.current = true;
         setScreen('quiz');
       } catch {
@@ -268,19 +297,67 @@ function ExamApp() {
 
   const saveSnapshot = useCallback(async (nextAnswers = answers, nextEvents = events) => {
     if (!attemptId) return;
-    await api(`/api/attempts/${encodeURIComponent(attemptId)}`, {
+    try {
+      writeDraft(attemptId, nextAnswers, nextEvents);
+    } catch {
+      setSaveStatus('Не удалось сохранить копию на этом устройстве');
+    }
+    const request = saveQueue.current.catch(() => {}).then(() => api(`/api/attempts/${encodeURIComponent(attemptId)}`, {
       method: 'PUT', body: JSON.stringify({ answers: nextAnswers, events: nextEvents })
-    });
+    }));
+    saveQueue.current = request;
+    await request;
   }, [attemptId, answers, events]);
 
   useEffect(() => {
+    if (screen !== 'quiz' || !attemptId || !autosaveReady.current) return;
+    try {
+      writeDraft(attemptId, answers, events);
+      draftPending.current = true;
+    } catch {
+      setSaveStatus('Не удалось сохранить копию на этом устройстве');
+    }
+  }, [answers, events, screen, attemptId]);
+
+  useEffect(() => {
     if (screen !== 'quiz' || !attemptId || !autosaveReady.current || submitting) return undefined;
-    setSaveStatus('Сохранение…');
+    setSaveStatus(navigator.onLine ? 'Сохранение…' : 'Нет связи — ответ сохранён на устройстве');
     const timeout = window.setTimeout(() => {
-      saveSnapshot().then(() => setSaveStatus('Сохранено')).catch(() => setSaveStatus('Не удалось сохранить'));
+      if (!navigator.onLine) return;
+      saveSnapshot().then(() => {
+        draftPending.current = false;
+        setSaveStatus('Сохранено на сервере');
+      }).catch(() => {
+        draftPending.current = true;
+        setSaveStatus('Нет связи — ответы ждут отправки');
+      });
     }, 350);
     return () => window.clearTimeout(timeout);
   }, [answers, events, screen, attemptId, submitting, saveSnapshot]);
+
+  useEffect(() => {
+    if (screen !== 'quiz' || !attemptId || submitting) return undefined;
+    let retrying = false;
+    const syncPending = async () => {
+      if (!draftPending.current || !navigator.onLine || retrying) return;
+      retrying = true;
+      try {
+        await saveSnapshot();
+        draftPending.current = false;
+        setSaveStatus('Сохранено на сервере');
+      } catch {
+        setSaveStatus('Нет связи — ответы ждут отправки');
+      } finally {
+        retrying = false;
+      }
+    };
+    window.addEventListener('online', syncPending);
+    const retryTimer = window.setInterval(syncPending, 10000);
+    return () => {
+      window.removeEventListener('online', syncPending);
+      window.clearInterval(retryTimer);
+    };
+  }, [screen, attemptId, submitting, saveSnapshot]);
 
   useLayoutEffect(() => {
     if (answerScrollPosition.current === null) return;
@@ -309,6 +386,7 @@ function ExamApp() {
       });
       setResult(submitted);
       sessionStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem(draftKey(attemptId));
       setScreen('result');
     } catch (error) {
       setSubmitError(`Не удалось отправить попытку: ${error.message}. Проверьте соединение и попробуйте снова.`);
@@ -422,7 +500,7 @@ function ExamApp() {
             <div className="progress-copy"><span>Прогресс</span><span>{index + 1} из {questions.length} · {answeredCount} отвечено</span></div>
             <div className="progress-track"><span style={{ width: `${((index + 1) / questions.length) * 100}%` }} /></div>
           </div>
-          <p className="focus-hint"><span className="hint-mark">i</span> Переключение вкладки будет отмечено. Ответы сохраняются автоматически.</p>
+          <p className="focus-hint"><span className="hint-mark">i</span> Переключение вкладки будет отмечено. Если связь пропадёт, ответы останутся на устройстве и отправятся после восстановления интернета.</p>
           <p className="focus-hint"><span className="hint-mark">↻</span> {saveStatus}</p>
         </aside>
         <article className="question-panel">
